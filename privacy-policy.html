@@ -1,0 +1,3 @@
+import zipfile
+z=zipfile.ZipFile('/mnt/data/aso-news-bot-main.zip')
+print(z.read('aso-news-bot-main/privacy-policy.html').decode('utf-8'))
