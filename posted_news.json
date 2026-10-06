@@ -1,3 +1,1 @@
-import zipfile
-z=zipfile.ZipFile('/mnt/data/aso-news-bot-main.zip')
-print(z.read('aso-news-bot-main/posted_news.json').decode('utf-8'))
+[]
