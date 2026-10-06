@@ -1,3 +1,46 @@
-import zipfile
-z=zipfile.ZipFile('/mnt/data/aso-news-bot-main.zip')
-print(z.read('aso-news-bot-main/.github/workflows/main.yml').decode('utf-8'))
+name: ASO NEWS Auto Publisher
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: aso-news-publisher
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish-news:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Validate Python
+        run: python -m py_compile main.py
+      - name: Run ASO NEWS
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
+          FACEBOOK_GRAPH_VERSION: "v26.0"
+          GEMINI_TEXT_MODEL: "gemini-3.5-flash"
+        run: python main.py
+      - name: Save history
+        run: |
+          git config user.name "ASO NEWS Bot"
+          git config user.email "aso-news-bot@users.noreply.github.com"
+          git add posted_news.json
+          git diff --cached --quiet || git commit -m "Update posted news history"
+          git push
