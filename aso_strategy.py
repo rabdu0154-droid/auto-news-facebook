@@ -1,3 +1,4 @@
-import zipfile
-z=zipfile.ZipFile('/mnt/data/aso-news-bot-main.zip')
-print(z.read('aso-news-bot-main/aso_strategy.py').decode('utf-8'))
+import main
+
+if __name__ == "__main__":
+    main.main()
