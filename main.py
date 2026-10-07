@@ -5,6 +5,7 @@ import html
 import hashlib
 import base64
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
@@ -18,6 +19,8 @@ GRAPH_VERSION = os.getenv("FACEBOOK_GRAPH_VERSION", "v26.0")
 GEMINI_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-3.5-flash")
 GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-lite-image")
 IMAGE_TIMEOUT_SECONDS = int(os.getenv("GEMINI_IMAGE_TIMEOUT_SECONDS", "35"))
+TEXT_TIMEOUT_SECONDS = int(os.getenv("GEMINI_TEXT_TIMEOUT_SECONDS", "25"))
+RSS_TIMEOUT_SECONDS = int(os.getenv("RSS_TIMEOUT_SECONDS", "12"))
 HISTORY_FILE = "posted_news.json"
 IMAGE_FILE = "news_image.jpg"
 BACKGROUND_FILES = [
@@ -193,7 +196,7 @@ def rss(q):
 
 def fetch(name, priority, q):
     try:
-        root = ET.fromstring(http.get(rss(q), timeout=30).content)
+        root = ET.fromstring(http.get(rss(q), timeout=RSS_TIMEOUT_SECONDS).content)
     except Exception as e:
         print("RSS error", name, e)
         return []
@@ -248,8 +251,14 @@ def fetch(name, priority, q):
 
 def collect():
     a = []
-    for s in SOURCES:
-        a += fetch(*s)
+    # Fetch all RSS sources in parallel so one slow source cannot consume minutes.
+    with ThreadPoolExecutor(max_workers=min(12, len(SOURCES))) as pool:
+        futures = [pool.submit(fetch, *s) for s in SOURCES]
+        for future in as_completed(futures):
+            try:
+                a += future.result()
+            except Exception as e:
+                print("RSS worker error", e)
     return sorted(
         {x["id"]: x for x in a}.values(), key=lambda x: x["score"], reverse=True
     )[:30]
@@ -309,7 +318,7 @@ CANDIDATES:
     )
     try:
         r = call_gemini_with_retry(
-            client.models.generate_content, model=GEMINI_MODEL, contents=prompt
+            client.models.generate_content, model=GEMINI_MODEL, contents=prompt, timeout=TEXT_TIMEOUT_SECONDS
         )
         text = (r.text or "").strip()
     except Exception as e:
@@ -344,6 +353,7 @@ FULL_BODY: {x["full_body"]}
 TITLE: ...
 BODY: ...
 FULL_BODY: ...""",
+                timeout=TEXT_TIMEOUT_SECONDS,
             )
             tt = (tr.text or "").strip()
             x["kur_title"] = field_from_text(tt, "TITLE", x["kur_title"])
