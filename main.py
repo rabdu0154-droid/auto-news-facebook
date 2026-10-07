@@ -16,7 +16,7 @@ from google import genai
 PAGE_ID = "1128027710403407"
 GRAPH_VERSION = os.getenv("FACEBOOK_GRAPH_VERSION", "v26.0")
 GEMINI_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-3.5-flash")
-GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image")
+GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-lite-image")
 HISTORY_FILE = "posted_news.json"
 IMAGE_FILE = "news_image.jpg"
 BACKGROUND_FILES = [
