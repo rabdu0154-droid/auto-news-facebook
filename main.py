@@ -3,7 +3,7 @@ from email.utils import parsedate_to_datetime
 from datetime import datetime,timezone
 from urllib.parse import quote
 import requests
-from PIL import Image,ImageDraw,ImageFont
+from PIL import Image,ImageDraw,ImageFont,ImageOps
 from google import genai
 
 PAGE_ID="1128027710403407"
@@ -11,6 +11,7 @@ GRAPH_VERSION=os.getenv("FACEBOOK_GRAPH_VERSION","v26.0")
 GEMINI_MODEL=os.getenv("GEMINI_TEXT_MODEL","gemini-3.5-flash")
 HISTORY_FILE="posted_news.json"
 IMAGE_FILE="news_image.jpg"
+BACKGROUND_FILES=["news_background.jpg","news_background.png","background.jpg","background.png","assets/news_background.jpg","assets/news_background.png"]
 MAX_HISTORY=2000
 MAX_AGE_HOURS=48
 GEMINI_API_KEY=os.getenv("GEMINI_API_KEY")
@@ -34,22 +35,33 @@ SOURCES=[
 ("Reuters",48,"site:reuters.com Iraq OR Kurdistan OR Baghdad OR Erbil OR Kirkuk"),
 ("AP News",46,"site:apnews.com Iraq OR Kurdistan OR Baghdad OR Erbil OR Mosul"),
 ("BBC",40,"site:bbc.com/news Iraq OR Kurdistan OR Baghdad OR Erbil")]
+
 KURDISTAN=["kurdistan","kurdish","erbil","hawler","sulaymaniyah","sulaimani","duhok","kirkuk","halabja","هەولێر","سلێمانی","دهۆک","کوردستان","کەرکووک"]
 IRAQ=["iraq","baghdad","mosul","basra","najaf","karbala","anbar","nineveh","عێراق","بغداد","مووسڵ","بەصرە","نەجەف","کەربەلا"]
 BREAKING=["breaking","urgent","attack","strike","drone","missile","earthquake","fire","killed","death","crisis","هێرش","تەقینەوە","درۆن","مووشەک","ئاگر","کوژراو","قەیران","فۆری"]
+KURDISH_CHARS=set("ئەپچڕڵێۆیەوەکگژخدرتننمڵۆهسشعغفڤقڕێ")
+LATIN_RE=re.compile(r"[A-Za-z]")
 
 def clean(x):
     x=html.unescape(str(x or ""))
     return re.sub(r"\s+"," ",re.sub(r"<[^>]+>"," ",x)).strip()
-def nid(title,link): return hashlib.sha256((clean(link)+"|"+clean(title).lower()).encode()).hexdigest()
+
+def nid(title,link):
+    return hashlib.sha256((clean(link)+"|"+clean(title).lower()).encode()).hexdigest()
+
 def load():
     try:
         d=json.load(open(HISTORY_FILE,encoding="utf-8"))
         return [x if isinstance(x,str) else x.get("id") for x in d if isinstance(x,str) or isinstance(x,dict) and x.get("id")]
     except Exception:return []
+
 posted=load()
-def save(): json.dump(posted[-MAX_HISTORY:],open(HISTORY_FILE,"w",encoding="utf-8"),ensure_ascii=False,separators=(",",":"))
-def rss(q): return "https://news.google.com/rss/search?q="+quote(q)+"&hl=en-US&gl=US&ceid=US:en"
+
+def save():
+    json.dump(posted[-MAX_HISTORY:],open(HISTORY_FILE,"w",encoding="utf-8"),ensure_ascii=False,separators=(",",":"))
+
+def rss(q):
+    return "https://news.google.com/rss/search?q="+quote(q)+"&hl=en-US&gl=US&ceid=US:en"
 
 def fetch(name,priority,q):
     try: root=ET.fromstring(http.get(rss(q),timeout=30).content)
@@ -78,50 +90,122 @@ def collect():
     for s in SOURCES:a+=fetch(*s)
     return sorted({x["id"]:x for x in a}.values(),key=lambda x:x["score"],reverse=True)[:30]
 
+def is_sorani(text):
+    if not text:return False
+    t=clean(text)
+    kur=sum(c in KURDISH_CHARS for c in t)
+    latin=len(LATIN_RE.findall(t))
+    return kur>=5 and kur>=latin
+
 def edit_news(items):
     block="\n\n".join(f"SOURCE_NUMBER: {i}\nSOURCE: {x['source']}\nTITLE: {x['title']}\nSUMMARY: {x['summary'][:1000]}\nURL: {x['link']}" for i,x in enumerate(items,1))
-    prompt="""تۆ دەستکار و نووسەری هەواڵی ASO NEWS ـیت. یەک هەواڵی تازە و گرنگ هەڵبژێرە. کوردستان پێش عێراق و عێراق پێش جیهانە. هیچ زانیارییەک زیاد مەکە.
+    prompt="""تۆ دەستکار و نووسەری هەواڵی ASO NEWS ـیت.
+هەموو دەقەکە دەبێت بە کوردیی سۆرانیی ڕوون و سروشتی بێت.
+هیچ وشەی ئینگلیزی لە TITLE و BODY و FULL_BODY بەکارمەهێنە، تەنانەت ئەگەر سەرچاوەکە ئینگلیزی بێت؛ ناونیشان و ناوەڕۆک وەرگێڕە بۆ سۆرانی.
+کوردستان پێش عێراق و عێراق پێش جیهانە. هیچ زانیارییەک زیاد مەکە.
 تەنها ئەمانە بگەڕێنەوە:
 SOURCE_NUMBER: 1
-TITLE: ناونیشانی کوردی سۆرانی، 4 تا 8 وشە
-BODY: 2 تا 4 ڕستەی کورت
-FULL_BODY: 2 تا 5 پاراگرافی کورت
+TITLE: ناونیشانی کوردی سۆرانی، 5 تا 10 وشە
+BODY: 2 تا 4 ڕستەی کورت بە کوردی سۆرانی
+FULL_BODY: 2 تا 5 پاراگرافی کورت بە کوردی سۆرانی
 HASHTAGS: #ASONEWS #کوردستان #عێراق
 SOURCE: ناوی سەرچاوە
 
 CANDIDATES:
 """+block
     try:
-        r=client.models.generate_content(model=GEMINI_MODEL,contents=prompt); text=(r.text or "").strip()
-    except Exception as e: print("Gemini error",e); return None
-    m=re.search(r"SOURCE_NUMBER\s*:\s*(\d+)",text,re.I); idx=max(0,min((int(m.group(1))-1 if m else 0),len(items)-1)); x=items[idx].copy()
+        r=client.models.generate_content(model=GEMINI_MODEL,contents=prompt)
+        text=(r.text or "").strip()
+    except Exception as e:
+        print("Gemini error",e); return None
+    m=re.search(r"SOURCE_NUMBER\s*:\s*(\d+)",text,re.I)
+    idx=max(0,min((int(m.group(1))-1 if m else 0),len(items)-1))
+    x=items[idx].copy()
     def field(n,d):
         m=re.search(rf"^{n}\s*:\s*(.*?)(?=^\w[\w_ ]*\s*:|\Z)",text,re.I|re.M|re.S)
         return clean(m.group(1)) if m else d
-    x["kur_title"]=field("TITLE",x["title"]); x["body"]=field("BODY",x["summary"][:500]); x["full_body"]=field("FULL_BODY",x["body"]); x["hashtags"]=field("HASHTAGS","#ASONEWS #کوردستان #عێراق")
+    x["kur_title"]=field("TITLE",x["title"])
+    x["body"]=field("BODY",x["summary"][:500])
+    x["full_body"]=field("FULL_BODY",x["body"])
+    x["hashtags"]=field("HASHTAGS","#ASONEWS #کوردستان #عێراق")
+    x["source"]=field("SOURCE",x["source"])
+    if not is_sorani(x["kur_title"]+" "+x["body"]):
+        print("Gemini output was not Sorani; retrying translation")
+        try:
+            tr=client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=f"""ئەم هەواڵە بە تەواوی وەرگێڕە بۆ کوردی سۆرانی. هیچ ئینگلیزییەک مەهێڵە جگە لە هاشتاکەکان.
+TITLE: {x["kur_title"]}
+BODY: {x["body"]}
+FULL_BODY: {x["full_body"]}
+تەنها بەو شێوەیە بگەڕێنەوە:
+TITLE: ...
+BODY: ...
+FULL_BODY: ..."""
+            )
+            tt=(tr.text or "").strip()
+            x["kur_title"]=field_from_text(tt,"TITLE",x["kur_title"])
+            x["body"]=field_from_text(tt,"BODY",x["body"])
+            x["full_body"]=field_from_text(tt,"FULL_BODY",x["full_body"])
+        except Exception as e:
+            print("Kurdish translation error",e)
     return x
 
+def field_from_text(text,name,default):
+    m=re.search(rf"^{name}\s*:\s*(.*?)(?=^\w[\w_ ]*\s*:|\Z)",text,re.I|re.M|re.S)
+    return clean(m.group(1)) if m else default
+
 def fallback(items):
-    x=items[0]; return {**x,"kur_title":x["title"],"body":x["summary"][:500],"full_body":x["summary"][:1000],"hashtags":"#ASONEWS #کوردستان #عێراق"}
+    x=items[0]
+    return {**x,
+        "kur_title":"هەواڵێکی گرنگ لە کوردستان",
+        "body":"هەواڵێکی تازە و گرنگ لە ناوچەکەوە بڵاوکراوەتەوە. وردەکارییەکان بەدوای پشتڕاستکردنەوەی سەرچاوەکە دەخرێنەڕوو.",
+        "full_body":"هەواڵەکە پەیوەندی بە کوردستان و عێراقەوە هەیە و لە سەرچاوەی سەرەکییەوە وەرگیراوە.",
+        "hashtags":"#ASONEWS #کوردستان #عێراق"}
+
+def find_background():
+    for p in BACKGROUND_FILES:
+        if os.path.exists(p):
+            return p
+    return None
 
 def make_image(news):
-    im=Image.new("RGB",(1200,675),(18,30,45)); d=ImageDraw.Draw(im)
-    for y in range(675):
-        v=int(18+25*y/675); d.line((0,y,1200,y),fill=(v,v+8,v+18))
+    bg=find_background()
+    if bg:
+        im=Image.open(bg).convert("RGB")
+        im=ImageOps.fit(im,(1200,675),method=Image.Resampling.LANCZOS)
+        print("Using custom background:",bg)
+    else:
+        im=Image.new("RGB",(1200,675),(18,30,45))
+        d=ImageDraw.Draw(im)
+        for y in range(675):
+            v=int(18+25*y/675)
+            d.line((0,y,1200,y),fill=(v,v+8,v+18))
+        print("Custom background not found; using fallback background")
+    d=ImageDraw.Draw(im)
     paths=["/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf","/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
     f=ImageFont.load_default()
     for p in paths:
-        if os.path.exists(p): f=ImageFont.truetype(p,52); break
-    d.text((600,340),news["kur_title"][:100],font=f,fill="white",anchor="mm",align="center",stroke_width=2,stroke_fill="black")
-    d.text((1160,35),"ASO NEWS",font=ImageFont.truetype(p,30) if os.path.exists(p) else f,fill=(246,88,18),anchor="ra")
-    im.save(IMAGE_FILE,"JPEG",quality=92); return IMAGE_FILE
+        if os.path.exists(p):
+            f=ImageFont.truetype(p,52)
+            break
+    title=news["kur_title"][:110]
+    d.text((600,340),title,font=f,fill="white",anchor="mm",align="center",stroke_width=3,stroke_fill="black")
+    brand_font=ImageFont.truetype(paths[0],30) if os.path.exists(paths[0]) else f
+    d.text((1160,35),"ASO NEWS",font=brand_font,fill=(246,88,18),anchor="ra",stroke_width=1,stroke_fill="black")
+    im.save(IMAGE_FILE,"JPEG",quality=92)
+    return IMAGE_FILE
 
 def publish(message,image):
     try:
-        with open(image,"rb") as f:r=http.post(f"https://graph.facebook.com/{GRAPH_VERSION}/{PAGE_ID}/photos",data={"access_token":FACEBOOK_TOKEN,"message":message},files={"source":("news.jpg",f,"image/jpeg")},timeout=90)
+        with open(image,"rb") as f:
+            r=http.post(f"https://graph.facebook.com/{GRAPH_VERSION}/{PAGE_ID}/photos",
+                data={"access_token":FACEBOOK_TOKEN,"message":message},
+                files={"source":("news.jpg",f,"image/jpeg")},timeout=90)
         print("Facebook status:",r.status_code)
         if r.ok:
-            d=r.json(); return d.get("post_id") or d.get("id")
+            d=r.json()
+            return d.get("post_id") or d.get("id")
         print("Facebook error:",r.text[:1000])
     except Exception as e: print("Facebook error:",e)
     return None
@@ -143,6 +227,7 @@ def main():
     extra=f"{news['full_body']}\n\nسەرچاوە: {news['source']}\n{news['link']}"
     pid=publish(message,make_image(news))
     if not pid:raise RuntimeError("Facebook post failed")
-    first_comment(pid,extra); posted.append(news["id"]); save(); print("Published:",pid)
+    first_comment(pid,extra)
+    posted.append(news["id"]); save(); print("Published:",pid)
 
 if __name__=="__main__":main()
