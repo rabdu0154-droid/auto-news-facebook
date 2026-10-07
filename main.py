@@ -17,6 +17,7 @@ PAGE_ID = "1128027710403407"
 GRAPH_VERSION = os.getenv("FACEBOOK_GRAPH_VERSION", "v26.0")
 GEMINI_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-3.5-flash")
 GEMINI_IMAGE_MODEL = os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-lite-image")
+IMAGE_TIMEOUT_SECONDS = int(os.getenv("GEMINI_IMAGE_TIMEOUT_SECONDS", "35"))
 HISTORY_FILE = "posted_news.json"
 IMAGE_FILE = "news_image.jpg"
 BACKGROUND_FILES = [
@@ -390,6 +391,7 @@ No captions, no text, no logos, no watermarks and no invented newspaper graphics
 The result is an illustrative AI-generated news visual, not a claim that it is a real photograph.
 """
     try:
+        print(f"Generating AI news image with {GEMINI_IMAGE_MODEL} (timeout {IMAGE_TIMEOUT_SECONDS}s)...")
         interaction = call_gemini_with_retry(
             client.interactions.create,
             model=GEMINI_IMAGE_MODEL,
@@ -400,6 +402,8 @@ The result is an illustrative AI-generated news visual, not a claim that it is a
                 "aspect_ratio": "4:5",
                 "image_size": "1K",
             },
+            retries=1,
+            timeout=IMAGE_TIMEOUT_SECONDS,
         )
         data = getattr(getattr(interaction, "output_image", None), "data", None)
         if data:
@@ -418,7 +422,7 @@ The result is an illustrative AI-generated news visual, not a claim that it is a
                             f.write(base64.b64decode(part.data))
                         return "ai_news_image.jpg"
     except Exception as e:
-        print("Gemini image generation failed:", e)
+        print(f"Gemini image generation failed or timed out after {IMAGE_TIMEOUT_SECONDS}s:", e)
     return None
 
 
