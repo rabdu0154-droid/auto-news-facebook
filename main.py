@@ -170,54 +170,112 @@ def find_background():
             return p
     return None
 
+def generate_ai_image(news):
+    """Generate a topic-specific editorial image with Gemini Image."""
+    prompt=f"""Create a professional editorial news image for ASO NEWS.
+News title: {news["kur_title"]}
+News summary: {news["body"]}
+Source context: {news.get("summary","")[:900]}
+
+Create a realistic, visually strong scene that directly represents this news topic.
+Use relevant people, places, objects, buildings, vehicles or events only when they fit the story.
+No captions, no text, no logos, no watermarks and no invented newspaper graphics.
+The result is an illustrative AI-generated news visual, not a claim that it is a real photograph.
+"""
+    try:
+        interaction=client.interactions.create(
+            model=GEMINI_IMAGE_MODEL,
+            input=prompt,
+            response_format={"type":"image","mime_type":"image/jpeg","aspect_ratio":"4:5","image_size":"1K"}
+        )
+        data=getattr(getattr(interaction,"output_image",None),"data",None)
+        if data:
+            with open("ai_news_image.jpg","wb") as f:
+                f.write(base64.b64decode(data))
+            print("AI news image generated:",GEMINI_IMAGE_MODEL)
+            return "ai_news_image.jpg"
+        for step in getattr(interaction,"steps",[]) or []:
+            if getattr(step,"type",None)=="model_output":
+                for part in getattr(step,"content",[]) or []:
+                    if getattr(part,"type",None)=="image" and getattr(part,"data",None):
+                        with open("ai_news_image.jpg","wb") as f:
+                            f.write(base64.b64decode(part.data))
+                        return "ai_news_image.jpg"
+    except Exception as e:
+        print("Gemini image generation failed:",e)
+    return None
+
+def fit_image(img,size):
+    return ImageOps.fit(img.convert("RGB"),size,method=Image.Resampling.LANCZOS,centering=(0.5,0.5))
+
+def paste_topic_image(base,path):
+    if not path or not os.path.exists(path):
+        return
+    w,h=base.size
+    pw,ph=round(w*0.49),round(h*0.64)
+    panel=fit_image(Image.open(path),(pw,ph))
+    mask=Image.new("L",(pw,ph),0)
+    md=ImageDraw.Draw(mask)
+    md.polygon([(round(pw*0.18),0),(pw,0),(pw,round(ph*0.78)),
+                (round(pw*0.76),ph),(0,round(ph*0.82))],fill=255)
+    base.paste(panel,(round(w*0.50),round(h*0.16)),mask)
+
 def make_image(news):
     bg=find_background()
     if bg:
-        im=Image.open(bg).convert("RGB")
-        # Keep the complete supplied background instead of cropping it to landscape.
+        original=Image.open(bg).convert("RGB")
         target_w=1200
-        target_h=round(im.height*target_w/im.width)
-        im=im.resize((target_w,target_h),Image.Resampling.LANCZOS)
+        target_h=round(original.height*target_w/original.width)
+        im=original.resize((target_w,target_h),Image.Resampling.LANCZOS)
         print("Using custom background:",bg,im.size)
     else:
-        im=Image.new("RGB",(1200,675),(18,30,45))
-        d=ImageDraw.Draw(im)
-        for y in range(675):
-            v=int(18+25*y/675)
-            d.line((0,y,1200,y),fill=(v,v+8,v+18))
+        im=Image.new("RGB",(1200,1352),(245,247,249))
         print("Custom background not found; using fallback background")
-    d=ImageDraw.Draw(im)
-    paths=["/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf","/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
-    f=ImageFont.load_default()
-    for p in paths:
-        if os.path.exists(p):
-            f=ImageFont.truetype(p,52)
-            break
 
-    # Put the Kurdish headline in the large empty center area of the supplied design.
-    title=clean(news["kur_title"])[:140]
-    max_width=im.width-260
-    words=title.split()
+    topic_path=generate_ai_image(news)
+    paste_topic_image(im,topic_path)
+
+    d=ImageDraw.Draw(im)
+    bold=ImageFont.load_default()
+    regular=ImageFont.load_default()
+    for p in ["/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf",
+              "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]:
+        if os.path.exists(p):
+            if "Bold" in p:
+                bold=ImageFont.truetype(p,58)
+            elif "Regular" in p:
+                regular=ImageFont.truetype(p,38)
+
+    title=clean(news["kur_title"])[:150]
+    max_width=round(im.width*0.43)
     lines=[]
     line=""
-    for word in words:
+    for word in title.split():
         test=(line+" "+word).strip()
-        if d.textbbox((0,0),test,font=f)[2] <= max_width:
+        if d.textbbox((0,0),test,font=bold)[2] <= max_width:
             line=test
         else:
             if line: lines.append(line)
             line=word
     if line: lines.append(line)
-    lines=lines[:4]
-    bbox=f.getbbox("کوردستان")
-    line_h=bbox[3]-bbox[1]+18
-    total_h=line_h*len(lines)
-    y0=round(im.height*0.43-total_h/2)
+    lines=lines[:5]
+    box=bold.getbbox("کوردستان")
+    line_h=box[3]-box[1]+22
+    y0=round(im.height*0.34-(line_h*len(lines))/2)
     for i,line in enumerate(lines):
-        d.text((im.width//2,y0+i*line_h),line,font=f,fill="white",anchor="ma",align="center",
-               stroke_width=3,stroke_fill="black")
+        d.text((round(im.width*0.25),y0+i*line_h),line,font=bold,
+               fill=(13,35,58),anchor="ma",align="center")
 
-    im.save(IMAGE_FILE,"JPEG",quality=92,optimize=True)
+    if topic_path:
+        label="وێنەی دروستکراوی AI"
+        d.rounded_rectangle((round(im.width*0.69),round(im.height*0.80),
+                             round(im.width*0.97),round(im.height*0.85)),
+                            radius=12,fill=(13,29,48))
+        d.text((round(im.width*0.83),round(im.height*0.825)),label,
+               font=regular,fill="white",anchor="mm")
+
+    im.save(IMAGE_FILE,"JPEG",quality=93,optimize=True)
     return IMAGE_FILE
 
 def publish(message,image):
