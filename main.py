@@ -12,7 +12,6 @@ from urllib.parse import quote
 import requests
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from google import genai
-from google.api_core.exceptions import ServiceUnavailable
 
 PAGE_ID = "1128027710403407"
 GRAPH_VERSION = os.getenv("FACEBOOK_GRAPH_VERSION", "v26.0")
@@ -273,7 +272,6 @@ def call_gemini_with_retry(func, *args, retries=3, delay=3, **kwargs):
             if (
                 "503" in err_str
                 or "UNAVAILABLE" in err_str
-                or isinstance(e, ServiceUnavailable)
             ):
                 if attempt == retries - 1:
                     raise e
