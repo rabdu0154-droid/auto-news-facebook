@@ -173,8 +173,11 @@ def make_image(news):
     bg=find_background()
     if bg:
         im=Image.open(bg).convert("RGB")
-        im=ImageOps.fit(im,(1200,675),method=Image.Resampling.LANCZOS)
-        print("Using custom background:",bg)
+        # Keep the complete supplied background instead of cropping it to landscape.
+        target_w=1200
+        target_h=round(im.height*target_w/im.width)
+        im=im.resize((target_w,target_h),Image.Resampling.LANCZOS)
+        print("Using custom background:",bg,im.size)
     else:
         im=Image.new("RGB",(1200,675),(18,30,45))
         d=ImageDraw.Draw(im)
@@ -189,11 +192,31 @@ def make_image(news):
         if os.path.exists(p):
             f=ImageFont.truetype(p,52)
             break
-    title=news["kur_title"][:110]
-    d.text((600,340),title,font=f,fill="white",anchor="mm",align="center",stroke_width=3,stroke_fill="black")
-    brand_font=ImageFont.truetype(paths[0],30) if os.path.exists(paths[0]) else f
-    d.text((1160,35),"ASO NEWS",font=brand_font,fill=(246,88,18),anchor="ra",stroke_width=1,stroke_fill="black")
-    im.save(IMAGE_FILE,"JPEG",quality=92)
+
+    # Put the Kurdish headline in the large empty center area of the supplied design.
+    title=clean(news["kur_title"])[:140]
+    max_width=im.width-260
+    words=title.split()
+    lines=[]
+    line=""
+    for word in words:
+        test=(line+" "+word).strip()
+        if d.textbbox((0,0),test,font=f)[2] <= max_width:
+            line=test
+        else:
+            if line: lines.append(line)
+            line=word
+    if line: lines.append(line)
+    lines=lines[:4]
+    bbox=f.getbbox("کوردستان")
+    line_h=bbox[3]-bbox[1]+18
+    total_h=line_h*len(lines)
+    y0=round(im.height*0.43-total_h/2)
+    for i,line in enumerate(lines):
+        d.text((im.width//2,y0+i*line_h),line,font=f,fill="white",anchor="ma",align="center",
+               stroke_width=3,stroke_fill="black")
+
+    im.save(IMAGE_FILE,"JPEG",quality=92,optimize=True)
     return IMAGE_FILE
 
 def publish(message,image):
