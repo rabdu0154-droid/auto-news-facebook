@@ -1,4 +1,4 @@
-import os,re,json,html,hashlib,xml.etree.ElementTree as ET
+import os,re,json,html,hashlib,base64,xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 from datetime import datetime,timezone
 from urllib.parse import quote
@@ -9,6 +9,7 @@ from google import genai
 PAGE_ID="1128027710403407"
 GRAPH_VERSION=os.getenv("FACEBOOK_GRAPH_VERSION","v26.0")
 GEMINI_MODEL=os.getenv("GEMINI_TEXT_MODEL","gemini-3.5-flash")
+GEMINI_IMAGE_MODEL=os.getenv("GEMINI_IMAGE_MODEL","gemini-3.1-flash-image")
 HISTORY_FILE="posted_news.json"
 IMAGE_FILE="news_image.jpg"
 BACKGROUND_FILES=["news_background.jpg","news_background.png","background.jpg","background.png","assets/news_background.jpg","assets/news_background.png"]
