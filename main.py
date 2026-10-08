@@ -373,11 +373,18 @@ def field_from_text(text, name, default):
 
 def fallback(items):
     x = items[0]
+    title = clean(x.get("title", "")) or "هەواڵێکی تازە"
+    summary = clean(x.get("summary", "")) or title
+    # The image gets a short version; the first comment gets the longer RSS detail.
+    if len(title) > 120:
+        title = title[:117].rsplit(" ", 1)[0] + "..."
+    short = summary[:360]
+    full = summary[:3000]
     return {
         **x,
-        "kur_title": "هەواڵێکی گرنگ لە کوردستان",
-        "body": "هەواڵێکی تازە و گرنگ لە ناوچەکەوە بڵاوکراوەتەوە. وردەکارییەکان بەدوای پشتڕاستکردنەوەی سەرچاوەکە دەخرێنەڕوو.",
-        "full_body": "هەواڵەکە پەیوەندی بە کوردستان و عێراقەوە هەیە و لە سەرچاوەی سەرەکییەوە وەرگیراوە.",
+        "kur_title": title,
+        "body": short,
+        "full_body": full,
         "hashtags": "#ASONEWS #کوردستان #عێراق",
     }
 
