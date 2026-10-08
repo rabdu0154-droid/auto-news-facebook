@@ -387,10 +387,12 @@ SUMMARY_ORIGINAL: {x.get("summary","")[:3000]}
 SOURCE_ORIGINAL: {x.get("source","")}
 """
     try:
-        r = client.models.generate_content(
+        r = call_gemini_with_retry(
+            client.models.generate_content,
             model=GEMINI_MODEL,
             contents=prompt,
-            timeout=15,
+            retries=3,
+            delay=2,
         )
         text = (r.text or "").strip()
         if not text:
@@ -398,7 +400,7 @@ SOURCE_ORIGINAL: {x.get("source","")}
 
         def get_field(name, default):
             m = re.search(
-                rf"^{name}\\s*:\\s*(.*?)(?=^\\w[\\w_ ]*\\s*:|\\Z)",
+                rf"^{name}\s*:\s*(.*?)(?=^\w[\w_ ]*\s*:|\Z)",
                 text,
                 re.I | re.M | re.S,
             )
@@ -676,7 +678,9 @@ def main():
     print("Candidates:", len(items))
     if not items:
         return
-    news = translate_news_to_sorani(items[0]) or fallback(items)
+    news = translate_news_to_sorani(items[0])
+    if not news:
+        raise RuntimeError("Sorani translation failed; refusing to publish non-Sorani news")
     message = f"{news['kur_title']}\n\n{news['body']}\n\n{news['hashtags']}"
     extra = f"{news['full_body']}\n\nسەرچاوە: {news['source']}\n{news['link']}"
     pid = publish(message, make_image(news))
