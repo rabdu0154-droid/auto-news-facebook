@@ -481,8 +481,8 @@ def make_image(news):
         im = Image.new("RGB", (1200, 1352), (245, 247, 249))
         print("Custom background not found or broken; using fallback background")
 
-    topic_path = generate_ai_image(news)
-    paste_topic_image(im, topic_path)
+    topic_path = None
+    # AI image generation is intentionally disabled for now so publishing never waits on it.
 
     d = ImageDraw.Draw(im)
     bold = ImageFont.load_default()
@@ -526,7 +526,7 @@ def make_image(news):
             align="center",
         )
 
-    if topic_path:
+    if False and topic_path:
         label = "وێنەی دروستکراوی AI"
         d.rounded_rectangle(
             (
@@ -592,7 +592,7 @@ def main():
     print("Candidates:", len(items))
     if not items:
         return
-    news = edit_news(items) or fallback(items)
+    news = fallback(items)
     message = f"{news['kur_title']}\n\n{news['body']}\n\n{news['hashtags']}"
     extra = f"{news['full_body']}\n\nسەرچاوە: {news['source']}\n{news['link']}"
     pid = publish(message, make_image(news))
