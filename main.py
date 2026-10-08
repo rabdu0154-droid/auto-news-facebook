@@ -190,7 +190,7 @@ def rss(q):
     return (
         "https://news.google.com/rss/search?q="
         + quote(q)
-        + "&hl=en-US&gl=US&ceid=US:en"
+        + "&hl=ckb&gl=IQ&ceid=IQ:ckb"
     )
 
 
@@ -369,6 +369,55 @@ def field_from_text(text, name, default):
         rf"^{name}\s*:\s*(.*?)(?=^\w[\w_ ]*\s*:|\Z)", text, re.I | re.M | re.S
     )
     return clean(m.group(1)) if m else default
+
+
+
+def translate_news_to_sorani(x):
+    """Translate one selected RSS item to natural Sorani for the post and comment."""
+    prompt = f"""هەواڵی خوارەوە بۆ پەیجی ASO NEWS بە کوردیی سۆرانیی ڕوون و سروشتی بنووسە.
+هیچ زانیارییەکی نوێ زیاد مەکە و ناوی کۆمپانیا/کەس/شوێن بە شێوەی دروست بهێڵە.
+تەنها ئەم فیلدانە بگەڕێنەوە:
+TITLE: ناونیشانی کورت و ڕوون بە سۆرانی
+BODY: 2 تا 4 ڕستەی کورت بە سۆرانی
+FULL_BODY: وردەکاریی هەواڵەکە بە سۆرانی، 2 تا 5 پاراگرافی کورت
+SOURCE: ناوی سەرچاوە
+
+TITLE_ORIGINAL: {x.get("title","")}
+SUMMARY_ORIGINAL: {x.get("summary","")[:3000]}
+SOURCE_ORIGINAL: {x.get("source","")}
+"""
+    try:
+        r = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            timeout=15,
+        )
+        text = (r.text or "").strip()
+        if not text:
+            return None
+
+        def get_field(name, default):
+            m = re.search(
+                rf"^{name}\\s*:\\s*(.*?)(?=^\\w[\\w_ ]*\\s*:|\\Z)",
+                text,
+                re.I | re.M | re.S,
+            )
+            return clean(m.group(1)) if m else default
+
+        out = x.copy()
+        out["kur_title"] = get_field("TITLE", x.get("title", ""))
+        out["body"] = get_field("BODY", x.get("summary", "")[:360])
+        out["full_body"] = get_field("FULL_BODY", out["body"])
+        out["hashtags"] = "#ASONEWS #کوردستان #عێراق"
+        out["source"] = get_field("SOURCE", x.get("source", ""))
+        if not is_sorani(out["kur_title"] + " " + out["body"] + " " + out["full_body"]):
+            print("Sorani translation did not pass language check")
+            return None
+        print("Sorani translation succeeded")
+        return out
+    except Exception as e:
+        print("Sorani translation failed:", e)
+        return None
 
 
 def fallback(items):
@@ -598,20 +647,27 @@ def publish(message, image):
 
 
 def first_comment(pid, text):
-    targets = (
-        [str(pid), f"{PAGE_ID}_{pid}"] if "_" not in str(pid) else [str(pid)]
-    )
-    for t in targets:
+    targets = []
+    raw = str(pid)
+    if raw:
+        targets.append(raw)
+        if "_" not in raw:
+            targets.append(f"{PAGE_ID}_{raw}")
+
+    for t in dict.fromkeys(targets):
         try:
             r = http.post(
                 f"https://graph.facebook.com/{GRAPH_VERSION}/{t}/comments",
                 data={"access_token": FACEBOOK_TOKEN, "message": text},
                 timeout=40,
             )
+            print("First comment status:", r.status_code, "target:", t)
             if r.ok:
+                print("First comment posted")
                 return True
-        except Exception:
-            pass
+            print("First comment error:", r.text[:800])
+        except Exception as e:
+            print("First comment exception:", e)
     return False
 
 
@@ -620,13 +676,14 @@ def main():
     print("Candidates:", len(items))
     if not items:
         return
-    news = fallback(items)
+    news = translate_news_to_sorani(items[0]) or fallback(items)
     message = f"{news['kur_title']}\n\n{news['body']}\n\n{news['hashtags']}"
     extra = f"{news['full_body']}\n\nسەرچاوە: {news['source']}\n{news['link']}"
     pid = publish(message, make_image(news))
     if not pid:
         raise RuntimeError("Facebook post failed")
-    first_comment(pid, extra)
+    if not first_comment(pid, extra):
+        raise RuntimeError("Facebook post succeeded, but first comment failed")
     posted.append(news["id"])
     save()
     print("Published:", pid)
