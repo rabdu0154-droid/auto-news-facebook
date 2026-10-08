@@ -506,29 +506,50 @@ def make_image(news):
                 regular = ImageFont.truetype(p, 38)
 
     title = clean(news["kur_title"])[:150]
-    max_width = round(im.width * 0.43)
-    lines = []
-    line = ""
-    for word in title.split():
-        test = (line + " " + word).strip()
-        if d.textbbox((0, 0), test, font=bold)[2] <= max_width:
-            line = test
-        else:
-            if line:
-                lines.append(line)
-            line = word
-    if line:
-        lines.append(line)
-    lines = lines[:5]
-    box = bold.getbbox("کوردستان")
-    line_h = box[3] - box[1] + 22
-    y0 = round(im.height * 0.34 - (line_h * len(lines)) / 2)
-    for i, line in enumerate(lines):
+    body = clean(news.get("body", ""))[:360]
+    max_width = round(im.width * 0.44)
+
+    def wrap(text, font, limit):
+        result, line = [], ""
+        for word in text.split():
+            test = (line + " " + word).strip()
+            if d.textbbox((0, 0), test, font=font)[2] <= limit:
+                line = test
+            else:
+                if line:
+                    result.append(line)
+                line = word
+            if len(result) >= 5:
+                break
+        if line and len(result) < 5:
+            result.append(line)
+        return result
+
+    title_lines = wrap(title, bold, max_width)[:4]
+    body_lines = wrap(body, regular, round(im.width * 0.42))[:4]
+    title_h = 64
+    body_h = 44
+    total_h = len(title_lines) * title_h + len(body_lines) * body_h + 25
+    y0 = round(im.height * 0.43 - total_h / 2)
+    center_x = round(im.width * 0.25)
+
+    for i, line in enumerate(title_lines):
         d.text(
-            (round(im.width * 0.25), y0 + i * line_h),
+            (center_x, y0 + i * title_h),
             line,
             font=bold,
             fill=(13, 35, 58),
+            anchor="ma",
+            align="center",
+        )
+
+    by = y0 + len(title_lines) * title_h + 18
+    for i, line in enumerate(body_lines):
+        d.text(
+            (center_x, by + i * body_h),
+            line,
+            font=regular,
+            fill=(35, 45, 55),
             anchor="ma",
             align="center",
         )
